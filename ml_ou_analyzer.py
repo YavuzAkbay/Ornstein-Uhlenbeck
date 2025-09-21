@@ -1,14 +1,4 @@
 #!/usr/bin/env python3
-"""
-Machine Learning Enhanced Ornstein-Uhlenbeck Process Analyzer
-============================================================
-
-A PyTorch-based OU process analyzer that uses neural networks to optimize
-parameters and find the most effective mean reversion strategies.
-
-Author: Quantitative Analyst
-License: Scientific Research Use
-"""
 
 import numpy as np
 import pandas as pd
@@ -28,51 +18,38 @@ import os
 import json
 from pathlib import Path
 
-# PyTorch imports
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 import torch.nn.functional as F
 
-# Sklearn for preprocessing and evaluation
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.ensemble import RandomForestRegressor
 
-# Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
-# Suppress warnings for cleaner output
 warnings.filterwarnings('ignore')
-
-# Set matplotlib style for professional appearance
 plt.style.use('seaborn-v0_8-whitegrid')
 sns.set_palette("husl")
 
-# Set device for PyTorch
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 logger.info(f"Using device: {device}")
 
 
 class OUDataCache:
-    """
-    Data caching system for historical price data
-    """
     
     def __init__(self, cache_dir: str = "data_cache"):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(exist_ok=True)
         
     def get_cache_path(self, symbol: str, period: str) -> Path:
-        """Get cache file path for symbol and period"""
         safe_symbol = symbol.replace('=', '_').replace('^', '_')
         return self.cache_dir / f"{safe_symbol}_{period}.pkl"
     
     def load_data(self, symbol: str, period: str) -> Optional[pd.DataFrame]:
-        """Load cached data if available"""
         cache_path = self.get_cache_path(symbol, period)
         if cache_path.exists():
             try:
@@ -85,7 +62,6 @@ class OUDataCache:
         return None
     
     def save_data(self, symbol: str, period: str, data: pd.DataFrame):
-        """Save data to cache"""
         cache_path = self.get_cache_path(symbol, period)
         try:
             with open(cache_path, 'wb') as f:
@@ -96,9 +72,6 @@ class OUDataCache:
 
 
 class OUParameterDataset(Dataset):
-    """
-    PyTorch Dataset for OU parameter optimization
-    """
     
     def __init__(self, features: np.ndarray, targets: np.ndarray):
         self.features = torch.FloatTensor(features)
@@ -112,9 +85,6 @@ class OUParameterDataset(Dataset):
 
 
 class OUParameterNet(nn.Module):
-    """
-    Neural network for OU parameter optimization
-    """
     
     def __init__(self, input_size: int, hidden_sizes: List[int] = [128, 64, 32], 
                  output_size: int = 1, dropout_rate: float = 0.2):
@@ -141,9 +111,6 @@ class OUParameterNet(nn.Module):
 
 
 class GoalValidator:
-    """
-    Validates optimization goals and objectives to ensure they are optimal
-    """
     
     def __init__(self):
         self.validation_results = {}
@@ -153,45 +120,33 @@ class GoalValidator:
                                       returns: pd.Series,
                                       deviation: pd.Series,
                                       metrics: Dict[str, float]) -> Dict[str, float]:
-        """
-        Calculate alternative objective functions for comparison
-        """
         objectives = {}
         
-        # 1. Pure Mean Reversion Strength
         objectives['pure_mean_reversion'] = metrics['mean_reversion_strength']
-        
-        # 2. Risk-Adjusted Return (Sharpe Ratio)
         objectives['sharpe_ratio'] = metrics['sharpe_ratio']
         
-        # 3. Maximum Drawdown Minimization
         cumulative_returns = (1 + returns).cumprod()
         rolling_max = cumulative_returns.expanding().max()
         drawdown = (cumulative_returns - rolling_max) / rolling_max
-        objectives['max_drawdown'] = -drawdown.min()  # Negative for minimization
+        objectives['max_drawdown'] = -drawdown.min()
         
-        # 4. Volatility-Adjusted Mean Reversion
         vol_adj_mean_rev = metrics['mean_reversion_strength'] / (metrics['volatility_annualized'] / 100)
         objectives['vol_adj_mean_reversion'] = vol_adj_mean_rev
         
-        # 5. Band Hit Rate Optimization (want moderate hit rate, not too high/low)
-        optimal_hit_rate = 0.15  # 15% is often optimal for mean reversion
+        optimal_hit_rate = 0.15
         hit_rate_penalty = abs(metrics['band_hit_rate'] - optimal_hit_rate)
         objectives['band_hit_optimization'] = 1 - hit_rate_penalty
         
-        # 6. Consistency Score (low variance in returns)
         rolling_returns = returns.rolling(window=20).mean()
-        consistency = 1 / (rolling_returns.std() + 1e-6)  # Higher is better
+        consistency = 1 / (rolling_returns.std() + 1e-6)
         objectives['consistency'] = consistency
         
-        # 7. Information Ratio (excess return per unit of tracking error)
-        benchmark_return = returns.mean()  # Using mean as benchmark
+        benchmark_return = returns.mean()
         excess_returns = returns - benchmark_return
         tracking_error = excess_returns.std()
         information_ratio = excess_returns.mean() / (tracking_error + 1e-6)
         objectives['information_ratio'] = information_ratio
         
-        # 8. Calmar Ratio (return / max drawdown)
         calmar_ratio = metrics['total_return'] / (abs(objectives['max_drawdown']) + 1e-6)
         objectives['calmar_ratio'] = calmar_ratio
         
@@ -202,32 +157,25 @@ class GoalValidator:
                          upper_band: pd.Series,
                          lower_band: pd.Series,
                          mean: pd.Series) -> Dict[str, float]:
-        """
-        Backtest a simple mean reversion strategy
-        """
         signals = pd.Series(0, index=prices.index)
         positions = pd.Series(0, index=prices.index)
         
-        # Generate signals
         for i in range(1, len(prices)):
             if prices.iloc[i] > upper_band.iloc[i]:
-                signals.iloc[i] = -1  # Sell signal
+                signals.iloc[i] = -1
             elif prices.iloc[i] < lower_band.iloc[i]:
-                signals.iloc[i] = 1   # Buy signal
+                signals.iloc[i] = 1
             else:
-                signals.iloc[i] = 0   # Hold
+                signals.iloc[i] = 0
                 
-            # Update position
             positions.iloc[i] = signals.iloc[i]
         
-        # Calculate strategy returns
         strategy_returns = positions.shift(1) * prices.pct_change()
         strategy_returns = strategy_returns.dropna()
         
         if len(strategy_returns) == 0:
             return {'strategy_return': 0, 'strategy_sharpe': 0, 'win_rate': 0}
         
-        # Strategy metrics
         strategy_return = (1 + strategy_returns).prod() - 1
         strategy_sharpe = strategy_returns.mean() / (strategy_returns.std() + 1e-6) * np.sqrt(252)
         win_rate = (strategy_returns > 0).mean()
@@ -241,15 +189,10 @@ class GoalValidator:
     def statistical_significance_test(self, 
                                     optimization_scores: List[float],
                                     baseline_scores: List[float]) -> Dict[str, float]:
-        """
-        Test statistical significance of optimization results
-        """
         from scipy import stats
         
-        # T-test for difference in means
         t_stat, p_value = stats.ttest_ind(optimization_scores, baseline_scores)
         
-        # Effect size (Cohen's d)
         pooled_std = np.sqrt(((len(optimization_scores) - 1) * np.var(optimization_scores, ddof=1) + 
                              (len(baseline_scores) - 1) * np.var(baseline_scores, ddof=1)) / 
                             (len(optimization_scores) + len(baseline_scores) - 2))
@@ -268,28 +211,22 @@ class GoalValidator:
                                 data: pd.DataFrame,
                                 param_combinations: List[Dict],
                                 objective_functions: List[str]) -> Dict[str, Dict]:
-        """
-        Cross-validate different objective functions
-        """
         results = {}
         
         for obj_func in objective_functions:
             scores = []
             
-            for params in param_combinations[:100]:  # Sample for speed
+            for params in param_combinations[:100]:
                 try:
-                    # Calculate metrics
                     prices = data['close']
                     returns = np.log(prices / prices.shift(1)).dropna()
                     
-                    # Calculate OU components
                     ewma = prices.ewm(alpha=1-params['decay_factor'], adjust=False).mean()
                     volatility = prices.rolling(window=params['corr_length']).std()
                     upper_band = ewma + params['threshold'] * volatility
                     lower_band = ewma - params['threshold'] * volatility
                     deviation = (prices - ewma) / volatility
                     
-                    # Calculate basic metrics
                     autocorr = returns.rolling(window=params['corr_length']).apply(
                         lambda x: x.autocorr(lag=1) if len(x) == params['corr_length'] else np.nan
                     ).dropna()
@@ -306,12 +243,10 @@ class GoalValidator:
                         'sharpe_ratio': sharpe_ratio
                     }
                     
-                    # Calculate alternative objectives
                     alt_objectives = self.calculate_alternative_objectives(
                         prices, returns, deviation, metrics
                     )
                     
-                    # Get score for this objective function
                     if obj_func in alt_objectives:
                         scores.append(alt_objectives[obj_func])
                     else:
@@ -333,12 +268,6 @@ class GoalValidator:
 
 
 class MLOUAnalyzer:
-    """
-    Machine Learning Enhanced Ornstein-Uhlenbeck Process Analyzer
-    
-    Uses PyTorch neural networks to optimize OU parameters and find
-    the most effective mean reversion strategies.
-    """
     
     def __init__(self, 
                  cache_dir: str = "data_cache",
@@ -349,33 +278,10 @@ class MLOUAnalyzer:
                  batch_size: int = 32,
                  num_epochs: int = 100,
                  enable_goal_validation: bool = True):
-        """
-        Initialize ML OU Analyzer
-        
-        Parameters:
-        -----------
-        cache_dir : str
-            Directory for caching historical data
-        model_dir : str
-            Directory for saving trained models
-        hidden_sizes : List[int]
-            Hidden layer sizes for neural network
-        dropout_rate : float
-            Dropout rate for regularization
-        learning_rate : float
-            Learning rate for optimizer
-        batch_size : int
-            Batch size for training
-        num_epochs : int
-            Number of training epochs
-        enable_goal_validation : bool
-            Enable goal validation and multi-objective optimization
-        """
         self.cache_dir = cache_dir
         self.model_dir = Path(model_dir)
         self.model_dir.mkdir(exist_ok=True)
         
-        # ML parameters
         self.hidden_sizes = hidden_sizes
         self.dropout_rate = dropout_rate
         self.learning_rate = learning_rate
@@ -383,17 +289,14 @@ class MLOUAnalyzer:
         self.num_epochs = num_epochs
         self.enable_goal_validation = enable_goal_validation
         
-        # Initialize components
         self.data_cache = OUDataCache(cache_dir)
         self.scaler = StandardScaler()
         self.models = {}
         self.optimization_results = {}
         
-        # Initialize goal validator
         if self.enable_goal_validation:
             self.goal_validator = GoalValidator()
         
-        # Parameter search space
         self.param_ranges = {
             'annual_theta': (0.5, 5.0),
             'corr_length': (20, 200),
@@ -401,7 +304,6 @@ class MLOUAnalyzer:
             'decay_factor': (0.85, 0.99)
         }
         
-        # Alternative objective functions for validation
         self.alternative_objectives = [
             'pure_mean_reversion',
             'sharpe_ratio', 
@@ -417,10 +319,6 @@ class MLOUAnalyzer:
                            period: str = "5y",
                            interval: str = "1d",
                            use_cache: bool = True) -> pd.DataFrame:
-        """
-        Fetch historical commodity data with caching
-        """
-        # Try to load from cache first
         if use_cache:
             cached_data = self.data_cache.load_data(symbol, period)
             if cached_data is not None:
@@ -435,11 +333,9 @@ class MLOUAnalyzer:
             if data.empty:
                 raise ValueError(f"No data found for symbol {symbol}")
             
-            # Clean data
             data = data.dropna()
             data.columns = [col.lower() for col in data.columns]
             
-            # Cache the data
             if use_cache:
                 self.data_cache.save_data(symbol, period, data)
             
@@ -457,33 +353,21 @@ class MLOUAnalyzer:
                            threshold: float,
                            decay_factor: float,
                            target_mean: Optional[float] = None) -> Dict[str, float]:
-        """
-        Calculate OU process metrics for given parameters
-        """
-        # Calculate returns
         returns = np.log(prices / prices.shift(1)).dropna()
         
-        # Calculate mean using EWMA
         ewma = prices.ewm(alpha=1-decay_factor, adjust=False).mean()
         if target_mean is not None:
             mean = 0.7 * ewma + 0.3 * target_mean
         else:
             mean = ewma
         
-        # Calculate volatility
         volatility = prices.rolling(window=corr_length).std()
-        
-        # Calculate deviation
         deviation = (prices - mean) / volatility
-        
-        # Calculate OU bands
         upper_band = mean + threshold * volatility
         lower_band = mean - threshold * volatility
         
-        # Calculate metrics
         metrics = {}
         
-        # Mean reversion strength
         autocorr = returns.rolling(window=corr_length).apply(
             lambda x: x.autocorr(lag=1) if len(x) == corr_length else np.nan
         ).dropna()
@@ -494,7 +378,6 @@ class MLOUAnalyzer:
         else:
             metrics['mean_reversion_strength'] = 0.0
         
-        # Deviation statistics
         deviation_clean = deviation.dropna()
         if len(deviation_clean) > 0:
             metrics['mean_deviation'] = deviation_clean.mean()
@@ -507,27 +390,21 @@ class MLOUAnalyzer:
             metrics['max_deviation'] = 0.0
             metrics['min_deviation'] = 0.0
         
-        # Band hit rate
         above_upper = (prices > upper_band).sum()
         below_lower = (prices < lower_band).sum()
         total_points = len(prices.dropna())
         metrics['band_hit_rate'] = (above_upper + below_lower) / total_points if total_points > 0 else 0.0
         
-        # Return statistics
         metrics['total_return'] = (prices.iloc[-1] / prices.iloc[0] - 1) * 100
         metrics['volatility_annualized'] = returns.std() * np.sqrt(252) * 100
         metrics['sharpe_ratio'] = metrics['total_return'] / metrics['volatility_annualized'] if metrics['volatility_annualized'] > 0 else 0
         
-        # Half-life
         daily_theta = annual_theta / 252
         metrics['half_life_days'] = int(np.log(2) / daily_theta) if daily_theta > 0 else 1000
         
         return metrics
     
     def generate_parameter_combinations(self, n_samples: int = 1000) -> List[Dict]:
-        """
-        Generate random parameter combinations for training
-        """
         combinations = []
         
         for _ in range(n_samples):
@@ -545,28 +422,21 @@ class MLOUAnalyzer:
                                  symbol: str,
                                  period: str = "5y",
                                  n_samples: int = 500) -> Dict:
-        """
-        Validate that the current optimization goal is optimal
-        """
         if not self.enable_goal_validation:
             return {'validation_enabled': False}
         
         logger.info(f"Validating optimization goal for {symbol}...")
         
-        # Fetch data
         data = self.fetch_commodity_data(symbol, period)
         prices = data['close']
         returns = np.log(prices / prices.shift(1)).dropna()
         
-        # Generate parameter combinations for testing
         param_combinations = self.generate_parameter_combinations(n_samples)
         
-        # Cross-validate different objective functions
         objective_results = self.goal_validator.cross_validate_objectives(
             symbol, data, param_combinations, self.alternative_objectives
         )
         
-        # Test current objective (mean reversion + sharpe)
         current_scores = []
         for params in param_combinations[:100]:
             try:
@@ -582,7 +452,6 @@ class MLOUAnalyzer:
             except:
                 continue
         
-        # Find best alternative objective
         best_objective = None
         best_score = -float('inf')
         
@@ -591,7 +460,6 @@ class MLOUAnalyzer:
                 best_score = obj_results['mean_score']
                 best_objective = obj_name
         
-        # Statistical significance test
         significance_test = None
         if current_scores and best_objective in objective_results:
             significance_test = self.goal_validator.statistical_significance_test(
@@ -599,11 +467,9 @@ class MLOUAnalyzer:
                 current_scores
             )
         
-        # Backtest comparison
         backtest_results = {}
         for obj_name in ['current', best_objective]:
             if obj_name == 'current':
-                # Use default parameters for current objective
                 params = {
                     'annual_theta': 2.5,
                     'corr_length': 100,
@@ -611,7 +477,6 @@ class MLOUAnalyzer:
                     'decay_factor': 0.95
                 }
             else:
-                # Find best parameters for alternative objective
                 best_params = None
                 best_score = -float('inf')
                 for p in param_combinations[:50]:
@@ -624,7 +489,6 @@ class MLOUAnalyzer:
                             decay_factor=p['decay_factor']
                         )
                         
-                        # Calculate alternative objective score
                         ewma = prices.ewm(alpha=1-p['decay_factor'], adjust=False).mean()
                         volatility = prices.rolling(window=p['corr_length']).std()
                         upper_band = ewma + p['threshold'] * volatility
@@ -646,13 +510,11 @@ class MLOUAnalyzer:
                 else:
                     continue
             
-            # Calculate OU components
             ewma = prices.ewm(alpha=1-params['decay_factor'], adjust=False).mean()
             volatility = prices.rolling(window=params['corr_length']).std()
             upper_band = ewma + params['threshold'] * volatility
             lower_band = ewma - params['threshold'] * volatility
             
-            # Backtest strategy
             backtest_results[obj_name] = self.goal_validator.backtest_strategy(
                 prices, upper_band, lower_band, ewma
             )
@@ -684,9 +546,6 @@ class MLOUAnalyzer:
                                     objective_results: Dict,
                                     best_objective: str,
                                     significance_test: Optional[Dict]) -> str:
-        """
-        Generate recommendation based on validation results
-        """
         if not current_scores or not objective_results:
             return "Insufficient data for validation"
         
@@ -712,16 +571,11 @@ class MLOUAnalyzer:
                            symbol: str,
                            period: str = "5y",
                            n_samples: int = 1000) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Create training data for parameter optimization
-        """
         logger.info(f"Creating training data for {symbol}...")
         
-        # Fetch price data
         data = self.fetch_commodity_data(symbol, period)
         prices = data['close']
         
-        # Generate parameter combinations
         param_combinations = self.generate_parameter_combinations(n_samples)
         
         features = []
@@ -729,7 +583,6 @@ class MLOUAnalyzer:
         
         for params in param_combinations:
             try:
-                # Calculate metrics for these parameters
                 metrics = self.calculate_ou_metrics(
                     prices=prices,
                     annual_theta=params['annual_theta'],
@@ -738,20 +591,18 @@ class MLOUAnalyzer:
                     decay_factor=params['decay_factor']
                 )
                 
-                # Create feature vector (price statistics + parameters)
                 feature_vector = [
                     prices.mean(),
                     prices.std(),
                     prices.skew(),
                     prices.kurtosis(),
-                    (prices.iloc[-1] / prices.iloc[0] - 1) * 100,  # Total return
+                    (prices.iloc[-1] / prices.iloc[0] - 1) * 100,
                     params['annual_theta'],
                     params['corr_length'],
                     params['threshold'],
                     params['decay_factor']
                 ]
                 
-                # Target: combination of mean reversion strength and Sharpe ratio
                 target = metrics['mean_reversion_strength'] * 0.7 + (metrics['sharpe_ratio'] / 10) * 0.3
                 
                 features.append(feature_vector)
@@ -771,31 +622,23 @@ class MLOUAnalyzer:
                             symbol: str,
                             period: str = "5y",
                             n_samples: int = 1000) -> nn.Module:
-        """
-        Train neural network for parameter optimization
-        """
         logger.info(f"Training parameter optimization model for {symbol}...")
         
-        # Create training data
         features, targets = self.create_training_data(symbol, period, n_samples)
         
-        # Split data
         X_train, X_test, y_train, y_test = train_test_split(
             features, targets, test_size=0.2, random_state=42
         )
         
-        # Scale features
         X_train_scaled = self.scaler.fit_transform(X_train)
         X_test_scaled = self.scaler.transform(X_test)
         
-        # Create datasets
         train_dataset = OUParameterDataset(X_train_scaled, y_train)
         test_dataset = OUParameterDataset(X_test_scaled, y_test)
         
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
         test_loader = DataLoader(test_dataset, batch_size=self.batch_size, shuffle=False)
         
-        # Initialize model
         input_size = X_train_scaled.shape[1]
         model = OUParameterNet(
             input_size=input_size,
@@ -804,17 +647,14 @@ class MLOUAnalyzer:
             dropout_rate=self.dropout_rate
         ).to(device)
         
-        # Initialize optimizer and loss
         optimizer = optim.Adam(model.parameters(), lr=self.learning_rate)
         criterion = nn.MSELoss()
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.5)
         
-        # Training loop
         train_losses = []
         test_losses = []
         
         for epoch in range(self.num_epochs):
-            # Training
             model.train()
             train_loss = 0.0
             for batch_features, batch_targets in train_loader:
@@ -828,7 +668,6 @@ class MLOUAnalyzer:
                 
                 train_loss += loss.item()
             
-            # Testing
             model.eval()
             test_loss = 0.0
             with torch.no_grad():
@@ -849,7 +688,6 @@ class MLOUAnalyzer:
             if epoch % 20 == 0:
                 logger.info(f"Epoch {epoch}: Train Loss = {train_loss:.6f}, Test Loss = {test_loss:.6f}")
         
-        # Save model
         model_path = self.model_dir / f"{symbol.replace('=', '_').replace('^', '_')}_model.pth"
         torch.save({
             'model_state_dict': model.state_dict(),
@@ -867,25 +705,19 @@ class MLOUAnalyzer:
                           symbol: str,
                           period: str = "5y",
                           n_iterations: int = 1000) -> Dict:
-        """
-        Use trained model to find optimal parameters
-        """
         logger.info(f"Optimizing parameters for {symbol}...")
         
-        # Load or train model
         if symbol not in self.models:
             self.train_parameter_model(symbol, period)
         
         model = self.models[symbol]
         model.eval()
         
-        # Generate candidate parameters
         candidates = self.generate_parameter_combinations(n_iterations)
         
         best_score = -float('inf')
         best_params = None
         
-        # Get price data for feature calculation
         data = self.fetch_commodity_data(symbol, period)
         prices = data['close']
         
@@ -899,7 +731,6 @@ class MLOUAnalyzer:
         
         with torch.no_grad():
             for params in candidates:
-                # Create feature vector
                 feature_vector = price_features + [
                     params['annual_theta'],
                     params['corr_length'],
@@ -907,19 +738,16 @@ class MLOUAnalyzer:
                     params['decay_factor']
                 ]
                 
-                # Scale features
                 feature_tensor = torch.FloatTensor(
                     self.scaler.transform([feature_vector])
                 ).to(device)
                 
-                # Get prediction
                 score = model(feature_tensor).item()
                 
                 if score > best_score:
                     best_score = score
                     best_params = params.copy()
         
-        # Calculate detailed metrics for best parameters
         best_metrics = self.calculate_ou_metrics(
             prices=prices,
             annual_theta=best_params['annual_theta'],
@@ -947,36 +775,27 @@ class MLOUAnalyzer:
                            n_samples: int = 1000,
                            n_iterations: int = 1000,
                            validate_goal: bool = True) -> Dict:
-        """
-        Complete ML-based OU analysis with optional goal validation
-        """
         logger.info(f"Starting ML OU analysis for {symbol}...")
         
-        # Validate optimization goal if enabled
         goal_validation = None
         if validate_goal and self.enable_goal_validation:
             goal_validation = self.validate_optimization_goal(symbol, period, n_samples//2)
         
-        # Optimize parameters
         optimization_result = self.optimize_parameters(symbol, period, n_iterations)
         
-        # Get optimal parameters
         optimal_params = optimization_result['optimal_parameters']
         
-        # Fetch data and calculate detailed analysis
         data = self.fetch_commodity_data(symbol, period)
         prices = data['close']
         returns = np.log(prices / prices.shift(1)).dropna()
         
-        # Calculate OU components with optimal parameters
         ewma = prices.ewm(alpha=1-optimal_params['decay_factor'], adjust=False).mean()
-        mean = ewma  # Using data-driven mean
+        mean = ewma
         volatility = prices.rolling(window=optimal_params['corr_length']).std()
         upper_band = mean + optimal_params['threshold'] * volatility
         lower_band = mean - optimal_params['threshold'] * volatility
         deviation = (prices - mean) / volatility
         
-        # Calculate consecutive bars
         consecutive_bars = pd.Series(0, index=deviation.index)
         for i in range(1, len(deviation)):
             if ((prices.iloc[i-1] < mean.iloc[i-1] and prices.iloc[i] >= mean.iloc[i]) or
@@ -984,8 +803,6 @@ class MLOUAnalyzer:
                 consecutive_bars.iloc[i] = 0
             elif abs(deviation.iloc[i]) > 0:
                 consecutive_bars.iloc[i] = min(consecutive_bars.iloc[i-1] + 1, 400)
-        
-        # Prepare results
         results = {
             'symbol': symbol,
             'data': data,
@@ -1010,9 +827,6 @@ class MLOUAnalyzer:
                               results: Dict, 
                               save_path: str = None,
                               figsize: Tuple[int, int] = (18, 14)) -> plt.Figure:
-        """
-        Create comprehensive ML visualization
-        """
         symbol = results['symbol']
         prices = results['prices']
         mean = results['mean']
@@ -1024,14 +838,10 @@ class MLOUAnalyzer:
         metrics = results['metrics']
         optimization_score = results['optimization_score']
         
-        # Create figure with subplots
         fig = plt.figure(figsize=figsize)
         gs = fig.add_gridspec(4, 2, height_ratios=[3, 1, 1, 1], width_ratios=[3, 1])
         
-        # Main price chart
         ax1 = fig.add_subplot(gs[0, 0])
-        
-        # Plot price and bands
         ax1.plot(prices.index, prices, 'k-', linewidth=1.5, label='Price', alpha=0.8)
         ax1.plot(mean.index, mean, 'b-', linewidth=2, label='ML-Optimized Mean (μ)', alpha=0.9)
         ax1.plot(upper_band.index, upper_band, 'g--', linewidth=1.5, 
@@ -1039,7 +849,6 @@ class MLOUAnalyzer:
         ax1.plot(lower_band.index, lower_band, 'r--', linewidth=1.5, 
                 label=f'Lower Band (-{optimal_params["threshold"]:.1f}σ)', alpha=0.7)
         
-        # Fill between bands
         ax1.fill_between(mean.index, mean, upper_band, 
                         where=(deviation > 0), 
                         color='green', alpha=0.1, interpolate=True)
@@ -1052,7 +861,6 @@ class MLOUAnalyzer:
         ax1.legend(loc='upper left', fontsize=10)
         ax1.grid(True, alpha=0.3)
         
-        # Deviation chart
         ax2 = fig.add_subplot(gs[1, 0], sharex=ax1)
         colors = ['red' if d < 0 else 'green' for d in deviation]
         ax2.bar(deviation.index, deviation, color=colors, alpha=0.6, width=1)
@@ -1063,7 +871,6 @@ class MLOUAnalyzer:
         ax2.set_title('Standardized Deviation from ML-Optimized Mean', fontsize=12)
         ax2.grid(True, alpha=0.3)
         
-        # Consecutive bars chart
         ax3 = fig.add_subplot(gs[2, 0], sharex=ax1)
         ax3.plot(consecutive_bars.index, consecutive_bars, 'purple', linewidth=1.5)
         ax3.axhline(y=metrics['half_life_days'], color='red', linestyle='--', alpha=0.7, 
@@ -1073,7 +880,6 @@ class MLOUAnalyzer:
         ax3.legend(fontsize=10)
         ax3.grid(True, alpha=0.3)
         
-        # Parameter optimization score
         ax4 = fig.add_subplot(gs[3, 0], sharex=ax1)
         ax4.axhline(y=optimization_score, color='orange', linewidth=3, 
                    label=f'ML Optimization Score: {optimization_score:.4f}')
@@ -1083,11 +889,8 @@ class MLOUAnalyzer:
         ax4.legend(fontsize=10)
         ax4.grid(True, alpha=0.3)
         
-        # ML Results panel
         ax5 = fig.add_subplot(gs[:, 1])
         ax5.axis('off')
-        
-        # Create ML results text
         ml_text = f"""
         ML-ENHANCED OU ANALYSIS
         ======================
@@ -1127,7 +930,6 @@ class MLOUAnalyzer:
         ------------------
         """
         
-        # Add ML interpretation
         if optimization_score > 0.5:
             ml_text += "Excellent ML optimization\n"
         elif optimization_score > 0.3:
@@ -1151,14 +953,12 @@ class MLOUAnalyzer:
                 fontsize=9, verticalalignment='top', fontfamily='monospace',
                 bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8))
         
-        # Format x-axis
         ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
         ax1.xaxis.set_major_locator(mdates.MonthLocator(interval=6))
         plt.setp(ax1.xaxis.get_majorticklabels(), rotation=45)
         
         plt.tight_layout()
         
-        # Save figure if path provided
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
             logger.info(f"ML visualization saved to {save_path}")
@@ -1169,9 +969,6 @@ class MLOUAnalyzer:
                                            validation_results: Dict,
                                            save_path: str = None,
                                            figsize: Tuple[int, int] = (16, 12)) -> plt.Figure:
-        """
-        Create visualization for goal validation results
-        """
         symbol = validation_results['symbol']
         current_scores = validation_results['current_objective_scores']
         alternative_objectives = validation_results['alternative_objectives']
@@ -1180,18 +977,15 @@ class MLOUAnalyzer:
         backtest_comparison = validation_results['backtest_comparison']
         recommendation = validation_results['recommendation']
         
-        # Create figure
         fig = plt.figure(figsize=figsize)
         gs = fig.add_gridspec(3, 2, height_ratios=[2, 1, 1], width_ratios=[2, 1])
         
-        # Objective comparison chart
         ax1 = fig.add_subplot(gs[0, 0])
         
         objectives = list(alternative_objectives.keys())
         means = [alternative_objectives[obj]['mean_score'] for obj in objectives]
         stds = [alternative_objectives[obj]['std_score'] for obj in objectives]
         
-        # Add current objective
         objectives.insert(0, 'Current (MR+Sharpe)')
         means.insert(0, current_scores['mean'])
         stds.insert(0, current_scores['std'])
@@ -1205,13 +999,11 @@ class MLOUAnalyzer:
         ax1.tick_params(axis='x', rotation=45)
         ax1.grid(True, alpha=0.3)
         
-        # Highlight best objective
         if best_objective in objectives:
             best_idx = objectives.index(best_objective)
             bars[best_idx].set_edgecolor('gold')
             bars[best_idx].set_linewidth(3)
         
-        # Backtest comparison
         ax2 = fig.add_subplot(gs[1, 0])
         
         if backtest_comparison:
@@ -1236,7 +1028,6 @@ class MLOUAnalyzer:
             ax2_twin.legend(loc='upper right')
             ax2.grid(True, alpha=0.3)
         
-        # Statistical significance
         ax3 = fig.add_subplot(gs[2, 0])
         
         if significance_test:
@@ -1255,15 +1046,11 @@ class MLOUAnalyzer:
             ax3.set_ylabel('Value')
             ax3.grid(True, alpha=0.3)
             
-            # Add significance line for p-value
             ax3.axhline(y=0.05, color='red', linestyle='--', alpha=0.7, label='α = 0.05')
             ax3.legend()
         
-        # Results panel
         ax4 = fig.add_subplot(gs[:, 1])
         ax4.axis('off')
-        
-        # Create results text
         results_text = f"""
         GOAL VALIDATION RESULTS
         =======================
@@ -1322,7 +1109,6 @@ class MLOUAnalyzer:
         
         plt.tight_layout()
         
-        # Save figure if path provided
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
             logger.info(f"Goal validation visualization saved to {save_path}")
@@ -1336,9 +1122,6 @@ class MLOUAnalyzer:
                        n_iterations: int = 1000,
                        save_plots: bool = True,
                        validate_goals: bool = True) -> Dict[str, Dict]:
-        """
-        Run ML OU analysis on multiple commodities with goal validation
-        """
         all_results = {}
         
         for symbol in symbols:
@@ -1354,18 +1137,14 @@ class MLOUAnalyzer:
                 all_results[symbol] = results
                 
                 if save_plots:
-                    # Save main ML analysis plot
                     filename = f"ml_ou_analysis_{symbol.replace('=', '_').replace('^', '_')}.png"
                     self.create_ml_visualization(results, save_path=filename)
                     
-                    # Save goal validation plot if available
                     if results['goal_validation'] and results['goal_validation'].get('validation_enabled', True):
                         validation_filename = f"goal_validation_{symbol.replace('=', '_').replace('^', '_')}.png"
                         self.create_goal_validation_visualization(
                             results['goal_validation'], save_path=validation_filename
                         )
-                
-                # Print summary
                 optimal_params = results['optimal_parameters']
                 metrics = results['metrics']
                 print(f"\n{'='*80}")
@@ -1382,7 +1161,6 @@ class MLOUAnalyzer:
                 print(f"Total Return: {metrics['total_return']:.2f}%")
                 print(f"Sharpe Ratio: {metrics['sharpe_ratio']:.3f}")
                 
-                # Print goal validation results if available
                 if results['goal_validation'] and results['goal_validation'].get('validation_enabled', True):
                     goal_val = results['goal_validation']
                     print(f"\nGOAL VALIDATION:")
@@ -1402,15 +1180,11 @@ class MLOUAnalyzer:
 
 
 def main():
-    """
-    Main function to run the ML OU analysis
-    """
     print("Machine Learning Enhanced Ornstein-Uhlenbeck Process Analyzer")
     print("=" * 70)
     print("PyTorch-based Parameter Optimization for Commodity Analysis")
     print("=" * 70)
     
-    # Initialize ML analyzer
     ml_analyzer = MLOUAnalyzer(
         cache_dir="data_cache",
         model_dir="models",
@@ -1420,8 +1194,6 @@ def main():
         batch_size=32,
         num_epochs=100
     )
-    
-    # Define commodity symbols for analysis
     commodities = {
         'Natural Gas': 'NG=F',
         'Crude Oil': 'CL=F',
@@ -1437,7 +1209,6 @@ def main():
     print("Commodities:", list(commodities.keys()))
     print(f"Using device: {device}")
     
-    # Run ML analysis with goal validation
     results = ml_analyzer.run_ml_analysis(
         symbols=list(commodities.values()),
         period="2y",
@@ -1446,8 +1217,6 @@ def main():
         save_plots=True,
         validate_goals=True
     )
-    
-    # Create ML summary comparison
     print(f"\n{'='*120}")
     print("ML ANALYSIS SUMMARY")
     print(f"{'='*120}")
