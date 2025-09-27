@@ -1,5 +1,12 @@
 # Ornstein-Uhlenbeck Process Analyzer: Advanced Mean Reversion Analysis for Commodities
 
+[![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/badge/License-GPL%20v3-green.svg)](https://opensource.org/licenses/GPL-3.0)
+[![Status](https://img.shields.io/badge/Status-Active-success.svg)](https://github.com/YavuzAkbay/stock-portfolio-backtest)
+[![Version](https://img.shields.io/badge/Version-1.0.0-orange.svg)](https://github.com/YavuzAkbay/stock-portfolio-backtest/releases)
+[![Issues](https://img.shields.io/badge/Issues-Open-red.svg)](https://github.com/YavuzAkbay/stock-portfolio-backtest/issues)
+[![Stars](https://img.shields.io/badge/Stars-⭐-yellow.svg)](https://github.com/YavuzAkbay/stock-portfolio-backtest/stargazers)
+
 **Author:** Yavuz Akbay  
 **Email:** akbay.yavuz@gmail.com
 
